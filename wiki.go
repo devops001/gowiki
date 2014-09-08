@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"html/template"
 	"fmt"
+  "regexp"
+  "errors"
 )
 
 /***************
@@ -39,18 +41,29 @@ func createDirs() {
 	}
 }
 
-func renderTemplate(w http.ResponseWriter, tmplName string, p *Page) {
-  err := templates.ExecuteTemplate(w, getTemplateFileNameWithoutPath(tmplName), p)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
 func cacheTemplates() *template.Template {
   v := getTemplateFileNameWithPath("view")
   e := getTemplateFileNameWithPath("edit")
   d := getTemplateFileNameWithPath("default")
   return template.Must(template.ParseFiles(v, e, d))
+}
+
+func getTitle(w http.ResponseWriter, r *http.Request) (string, error) {
+  m := validPath.FindStringSubmatch(r.URL.Path)
+  if m == nil {
+    http.NotFound(w, r)
+    msg := "invalid url: "+ r.URL.Path
+    fmt.Println(msg)
+    return "", errors.New(msg)
+  }
+  return m[2], nil  //<- m: 0=url, 1=handler, 2=title
+}
+
+func renderTemplate(w http.ResponseWriter, tmplName string, p *Page) {
+  err := templates.ExecuteTemplate(w, getTemplateFileNameWithoutPath(tmplName), p)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 /***************
@@ -79,7 +92,11 @@ func loadPage(title string) (*Page, error) {
  **************/
 
 func viewHandler(w http.ResponseWriter, r *http.Request) {
-	title := r.URL.Path[len("/view/"):]
+  fmt.Printf("in viewHandler. url: %s\n", r.URL.Path)
+	title, err := getTitle(w, r)
+  if err != nil {
+    return
+  }
 	p, err := loadPage(title)
 	if err != nil {
 		http.Redirect(w, r, "/edit/"+title, http.StatusFound)
@@ -89,7 +106,11 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func editHandler(w http.ResponseWriter, r *http.Request) {
-	title := r.URL.Path[len("/edit/"):]
+  fmt.Printf("in editHandler. url: %s\n", r.URL.Path)
+	title, err := getTitle(w, r)
+  if err != nil {
+    return
+  }
 	p, err := loadPage(title)
 	if err != nil {
 		p = &Page{Title:title}
@@ -98,10 +119,14 @@ func editHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func saveHandler(w http.ResponseWriter, r *http.Request) {
-	title := r.URL.Path[len("/save/"):]
+  fmt.Printf("in saveHandler. url: %s\n", r.URL.Path)
+  title, err := getTitle(w, r)
+  if err != nil {
+    return
+  }
 	body := r.FormValue("body")
 	p := &Page{Title: title, Body: []byte(body)}
-	err := p.save()
+	err = p.save()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -110,7 +135,11 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
-	title := r.URL.Path[len("/delete/"):]
+  fmt.Printf("in deleteHandler. url: %s\n", r.URL.Path)
+  title, err := getTitle(w, r)
+  if err != nil {
+    return
+  }
 	fileName := getPageFileNameWithPath(title)
 	if _, err := os.Stat(fileName); err == nil {
 		err = os.Remove(fileName)
@@ -125,7 +154,9 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func defaultHandler(w http.ResponseWriter, r *http.Request) {
-	renderTemplate(w, "default", nil)
+  fmt.Printf("in defaultHandler. url: %s\n", r.URL.Path)
+  p := &Page{Title:"wiki", Body:[]byte(r.URL.Path)}
+	renderTemplate(w, "default", p)
 }
 
 /***************
@@ -135,6 +166,8 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 var pagesDir     = "pages"
 var templatesDir = "templates"
 var templates    = cacheTemplates()
+var routeFilter  = "^(/|/view/|/edit/|/save/|/delete/)([a-zA-Z0-9_]*)$"
+var validPath    = regexp.MustCompile(routeFilter)
 
 func main() {
 	createDirs()
@@ -145,7 +178,12 @@ func main() {
 	http.HandleFunc("/delete/", deleteHandler)
 	http.HandleFunc("/",        defaultHandler)
 
-	http.ListenAndServe(":8080", nil)
+  addr := ":8080"
+  fmt.Printf("listening on %s\n", addr)
+  err := http.ListenAndServe(addr, nil)
+  if err != nil {
+    log.Fatal(err)
+  }
 }
 
 
