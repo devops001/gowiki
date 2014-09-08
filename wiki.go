@@ -15,12 +15,16 @@ import (
  * helpers
  **************/
 
-func getPageFileName(title string) string {
+func getPageFileNameWithPath(title string) string {
 	return path.Join(pagesDir, title+".txt")
 }
 
-func getTemplateFileName(tmplName string) string {
-	return path.Join(templatesDir, tmplName+".html")
+func getTemplateFileNameWithoutPath(tmplName string) string {
+  return tmplName + ".html"
+}
+
+func getTemplateFileNameWithPath(tmplName string) string {
+	return path.Join(templatesDir, getTemplateFileNameWithoutPath(tmplName))
 }
 
 func createDirs() {
@@ -36,15 +40,17 @@ func createDirs() {
 }
 
 func renderTemplate(w http.ResponseWriter, tmplName string, p *Page) {
-	t, err := template.ParseFiles(getTemplateFileName(tmplName))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	err = t.Execute(w, p)
+  err := templates.ExecuteTemplate(w, getTemplateFileNameWithoutPath(tmplName), p)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func cacheTemplates() *template.Template {
+  v := getTemplateFileNameWithPath("view")
+  e := getTemplateFileNameWithPath("edit")
+  d := getTemplateFileNameWithPath("default")
+  return template.Must(template.ParseFiles(v, e, d))
 }
 
 /***************
@@ -57,11 +63,11 @@ type Page struct {
 }
 
 func (p *Page) save() error {
-	return ioutil.WriteFile(getPageFileName(p.Title), p.Body, 0600)
+	return ioutil.WriteFile(getPageFileNameWithPath(p.Title), p.Body, 0600)
 }
 
 func loadPage(title string) (*Page, error) {
-	body, err := ioutil.ReadFile(getPageFileName(title))
+	body, err := ioutil.ReadFile(getPageFileNameWithPath(title))
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +111,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	title := r.URL.Path[len("/delete/"):]
-	fileName := getPageFileName(title)
+	fileName := getPageFileNameWithPath(title)
 	if _, err := os.Stat(fileName); err == nil {
 		err = os.Remove(fileName)
 		if err != nil {
@@ -128,6 +134,7 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 
 var pagesDir     = "pages"
 var templatesDir = "templates"
+var templates    = cacheTemplates()
 
 func main() {
 	createDirs()
